@@ -2,6 +2,8 @@
 import locale
 
 # lfs imports
+from django.utils import translation
+from lfs.core.translation_utils import uses_modeltranslation
 from lfs.plugins import PaymentMethodProcessor
 from lfs.plugins import PM_ORDER_IMMEDIATELY
 from lfs.caching.utils import lfs_get_object_or_404
@@ -15,6 +17,10 @@ from django.core.urlresolvers import reverse
 # django paypal imports
 from paypal.standard.conf import POSTBACK_ENDPOINT
 from paypal.standard.conf import SANDBOX_POSTBACK_ENDPOINT
+
+
+# paypal uses country codes for language
+PAYPAL_LANGUAGE_MAPPING = {'EN': 'US'}
 
 
 class PayPalProcessor(PaymentMethodProcessor):
@@ -34,6 +40,8 @@ class PayPalProcessor(PaymentMethodProcessor):
         return PM_ORDER_IMMEDIATELY
 
     def get_pay_link(self):
+        from lfs.customer.models import PreferredLanguage
+
         shop = lfs_get_object_or_404(Shop, pk=1)
         current_site = Site.objects.get(id=settings.SITE_ID)
         conv = locale.localeconv()
@@ -62,6 +70,20 @@ class PayPalProcessor(PaymentMethodProcessor):
             "amount": "%.2f" % (self.order.price - self.order.tax),
             "tax": "%.2f" % self.order.tax,
         }
+
+        if uses_modeltranslation() and self.order.user:
+            try:
+                info["lc"] = self.order.user.preferred_language.get_preferred_language()
+            except PreferredLanguage.DoesNotExist:
+                try:
+                    trans = translation.to_locale(translation.get_language())
+                    if '_' in trans:
+                        trans = trans.split('_')[1]
+                    trans = trans.upper()
+                    trans = getattr(settings, 'PAYPAL_LANGUAGE_MAPPING', PAYPAL_LANGUAGE_MAPPING).get(trans, trans)
+                    info["lc"] = trans
+                except Exception, e:
+                    pass
 
         parameters = "&".join(["%s=%s" % (k, v) for (k, v) in info.items()])
         if getattr(settings, 'PAYPAL_DEBUG', settings.DEBUG):
